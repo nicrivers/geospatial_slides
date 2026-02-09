@@ -1,0 +1,727 @@
+---
+title: "Introduction to geospatial data analysis in R"
+author: "Nic Rivers"
+format:
+  revealjs:
+    embed-resources: true
+editor: visual
+warning: false
+message: false
+---
+
+# Introduction
+
+Geospatial data is data that represents a particular geographic location.
+
+As a result of the proliferation of remote sensing data, there is increasingly a wide availability of geospatial data.
+
+In this workshop, we will learn how to use geospatial data in R.
+
+It is possible to combine geospatial data with other data for conducting a data analysis.
+
+## Types of geospatial data
+
+Geospatial data comes in two basic types:
+
+-   **vector** data represents points and shapes. For example, vector data could be used to locate cities and roads on a map, or to draw out the boundaries of an electoral district.
+
+-   **raster** data is a grid that represents a variable over the full extent of a map. For example, it would be common to show the temperature or the elevation (altitude) across the landscape using raster data.
+
+## Packages
+
+For geospatial data analysis, we will use the `sf` and `terra` packages. `terra` is especially for raster data.
+
+These both integrate well with the tidyverse. You'll need to install these with `install.packages()` the first time you use them. We will also use the tidyverse package.
+
+```{r echo=TRUE, warning=FALSE, message=FALSE}
+library(sf)
+library(terra)
+library(tidyverse)
+```
+
+## Vector data
+
+Here is an example of **vector** data. This data comes from the [City of Ottawa](https://open.ottawa.ca/search?q=collision) and shows locations of traffic collisions involving pedestrians or bicycles from 2017 to 2024. It also show the location of major roads in Ottawa, which is downloaded from Open Street Map. Notice how the vector data corresponds to points or shapes.
+
+## City of Ottawa roads and pedestrian/cycling collisions
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+# This is the process I used to download the road data from OSM
+# q1 <- osmdata::opq('Ottawa, Canada') %>%
+#   osmdata::add_osm_feature(key = 'highway', value = 'motorway') %>%
+#   osmdata::add_osm_feature(key = 'highway', value = 'trunk') %>%
+#   osmdata::add_osm_feature(key = 'highway', value = 'primary') %>%
+#   osmdata::add_osm_feature(key = 'highway', value = 'secondary')
+#   
+# ott_roads <- osmdata::osmdata_sp(q1)$osm_lines %>%
+#   st_as_sf() %>%
+#   dplyr::select(osm_id)
+# 
+# st_write(ott_roads, "data/ott_roads/ott_roads.shp", delete_layer=TRUE)
+ott_roads <- st_read("data/ott_roads/ott_roads.shp", quiet=TRUE)
+
+vec <- st_read("data/Traffic_Collision_Data/Traffic_Collision_Data.shp", quiet=TRUE) %>%
+  # filter out the erronous record
+  filter(Lat > 40) %>% 
+  # Set the CRS to be the same in both data sets
+  st_transform(st_crs(ott_roads))
+
+ggplot() +
+  geom_sf(data=ott_roads) +
+  geom_sf(data=vec %>% filter(Num_of_Bic > 0 | Num_Of_Ped > 0) %>% mutate(type = case_when(Num_of_Bic > 0 ~ "bicycle", Num_Of_Ped > 0 ~ "pedestrian")), alpha=0.25, aes(colour=type)) +
+  theme_void() +
+  scale_color_brewer(name="", palette="Set1") 
+```
+
+## What's the code?
+
+Read the roads data using `st_read()`. This is a special function for reading shapefiles (.shp). The data contains lines.
+
+```{r echo=TRUE}
+ott_roads <- st_read("data/ott_roads/ott_roads.shp", quiet=TRUE)
+```
+
+Read the traffic collisions data using `st_read()`. The data contains points where collisions took place. Filter to focus only on pedestrians and cyclists.
+
+```{r echo=TRUE}
+vec <- st_read("data/Traffic_Collision_Data/Traffic_Collision_Data.shp", quiet=TRUE) %>%
+  # filter out the erronous record
+  filter(Lat > 40) %>% 
+  # Set the CRS to be the same in both data sets
+  st_transform(st_crs(ott_roads)) %>% 
+  filter(Num_of_Bic > 0 | Num_Of_Ped > 0) %>% 
+  mutate(type = case_when(Num_of_Bic > 0 ~ "bicycle", 
+                          Num_Of_Ped > 0 ~ "pedestrian"))
+```
+
+## What's the code? (continued)
+
+Plot the data using `geom_sf()`. Notice how I can add layers on top of each other by specifying the data for each layer separately.
+
+```{r echo=TRUE, eval=FALSE}
+ggplot() +
+  geom_sf(data=ott_roads) +
+  geom_sf(data=vec, alpha=0.25, aes(colour=type)) +
+  theme_void() +
+  scale_color_brewer(name="", palette="Set1")
+```
+
+## Raster data
+
+Here is an example of **raster** data. This data set comes from [Natural Resources Canada](https://open.canada.ca/data/en/dataset/d8fa9a38-c4df-442a-8319-9bbcbdc29060/resource/b90b0339-1d99-4103-8a40-c3dce9f019de). Different colours on the map correspond to different types of forestry management regime, including protected areas, Treaty/Settlement lands, private lands, crown forest lands, etc. Notice how every spot on the map is covered by the data.
+
+## Forest management in Canada
+
+```{r echo=FALSE}
+ras <- rast(x = "data/Canada_MFv2020/Canada_MFv2020.tif")
+
+plot(ras)
+```
+
+## What's the code?
+
+Read the raster file (.tif) using the `rast()` function in the `terra` package.
+
+```{r echo=TRUE}
+ras <- rast(x = "data/Canada_MFv2020/Canada_MFv2020.tif")
+```
+
+Use the `plot()` function to make the map. Note that this is a different function than `ggplot()`.
+
+```{r echo=TRUE, eval=FALSE}
+plot(ras)
+```
+
+If we want to plot the data using `ggplot()` we need to convert the raster into a data frame. This is very slow, so it's better to stick with the `plot()` function above.
+
+```{r echo=TRUE, eval=FALSE}
+ras_df <- as.data.frame(ras, xy = TRUE, na.rm = TRUE)
+ggplot(ras_df, aes(x=x, y=y, fill=Canada_MFv2020)) +
+  geom_raster()
+```
+
+# Coordinate reference systems
+
+-   Spatial data are (usually) data about places on the Earth.
+
+-   The Earth is a three-dimensional ellipse, but it is convenient to display and conduct analysis in two dimensions.
+
+-   This means that we need a way of *projecting* three dimensional data onto two dimensionals.
+
+-   We can do this in lots of different ways. For example, two two maps below show a map of Canada using two different coordinate systems, or projections.
+
+## Coordinate reference systems
+
+```{r echo=FALSE, warnings=FALSE}
+pr <- st_read("data/lpr_000a21a_e/lpr_000a21a_e.shp", quiet=TRUE)
+q1 <- ggplot() + geom_sf(data=pr %>% filter(PRUID <= 59), fill="lightblue") + labs(title="NAD83")
+q2 <- q1 + coord_sf(crs=4326)  + labs(title="WGS84")
+gridExtra::grid.arrange(q1,q2, ncol=2)
+```
+
+## Coordinate reference systems
+
+-   For conducting geospatial analysis, thinking about the CRS is important, for a couple of reasons.
+
+    -   First, all CRSs distort, since they are projecting a three dimensional shape on two dimensions. It's important to choose an appropriate CRS for making plots. Usually, the two CRSs above are chosen for north american maps.
+
+    -   Second, when combining information from more than one geospatial source, it is critical to ensure that they are both projected using the same CRS.
+
+-   You can find out the CRS of a data set by using `st_crs()`, set CRS using `st_set_crs()`, and you can transform a data set from one CRS to another by using `st_transform()`.
+
+## Coordinate reference systems
+
+Coordinate system 4326 is longitude/latitude.
+
+# Vector data - details
+
+-   Vector data is usually provided as a shapefile.
+
+-   A shapefile usually is a compressed folder containing a number of files with identical names but different extensions.
+
+-   They are all important, but you will read the one with the .shp extension.
+
+-   You can use the function `st_read()` in the `sf` package to read vector data like a shapefile.
+
+## Vector data - reading provincial boundaries
+
+-   For our example, we will load a shapefile containing the provincial boundaries.
+
+-   You can obtain this shapefile on the [Statistics Canada](https://www12.statcan.gc.ca/census-recensement/2021/geo/sip-pis/boundary-limites/index2021-eng.cfm?year=21) website (download the digital, rather than cartographic file, because it is much smaller).
+
+-   Once you download it onto your computer, you'll need to unzip it (by right-clicking on it). You can read it using `st_read()`
+
+## Vector data - it's a data frame!
+
+```{r message=FALSE, echo=TRUE}
+pr <- st_read("data/lpr_000a21a_e/lpr_000a21a_e.shp", quiet=TRUE)
+
+# Look at the file
+head(pr, 2)
+```
+
+## What's in an sf object
+
+-   Notice that the file looks similar to a standard `tibble()` object – it contains rows corresponding to observations and columns corresponding to variables.
+
+-   In this case, each row is a province, and columns include things like the province name and the land area.
+
+-   For geospatial objects like this one, there is a special column called `geometry`.
+
+-   In this case, where the data is provincial boundaries, the geography column tells `R` exactly where the boundaries for each province lie.
+
+## Normal tidyverse operations
+
+Because the vector data looks like a `tibble()`, we can perform normal tidyverse operations (filter, mutate, ...).
+
+We can plot using `ggplot()` . `geom_sf()` is the layer type for this type of data.
+
+```{r}
+only_ontario <- pr %>%
+  filter(PRENAME == "Ontario")
+ggplot(only_ontario) +
+  geom_sf(fill="orange", alpha=0.2, colour="blue") +
+  theme_void() +
+  labs(title="Ontario!")
+```
+
+## Joining with other data
+
+We can also join the data set with other data.
+
+The following code loads some data on the crime severity index in 2023, and joins it with the provincial boundary file.
+
+```{r message=FALSE, echo=TRUE, eval=FALSE}
+# Obtain data on crime severity index
+crime <- cansim::get_cansim("35-10-0026") %>%
+  filter(REF_DATE == 2023, Statistics == "Crime severity index") %>%
+  dplyr::select(DGUID, csi=VALUE)
+
+# Join with the province shapefile
+pr_crime <- inner_join(pr, crime)
+```
+
+## Crime in Canadian provinces
+
+```{r message=FALSE, echo=FALSE}
+crime <- cansim::get_cansim("35-10-0026") %>%
+  filter(REF_DATE == 2023, Statistics == "Crime severity index") %>%
+  dplyr::select(DGUID, csi=VALUE)
+
+# Join with the province shapefile
+pr_crime <- inner_join(pr, crime)
+```
+
+```{r echo=TRUE}
+ggplot() +
+  geom_sf(data=pr_crime %>% filter(PRUID <= 59), aes(fill=csi)) +
+  scale_fill_gradient(name = "Crime severity index", low = "steelblue", high="firebrick") +
+  theme_void() +
+  labs(caption="Crime severity index from Statistics Canada 35-10-0026")
+```
+
+## Other operations
+
+```         
+```
+
+There are lots of other things you can do with vector data.
+
+To illustrate some of these we will use data from the City of Ottawa's [Parks and Greenspace](https://open.ottawa.ca/datasets/cfb079e407494c33b038e86c7e05288e_24/explore) shapefile as well as the [Crime Statistics](https://data.ottawapolice.ca/) from the City of Ottawa's Police Department.
+
+The Parks file contains the shapes/areas of parks in the city, and the crime file contains points where crimes have taken place.
+
+## Parks data
+
+First, we load the parks data.
+
+We will filter the data so that it only includes parks in the Somerset Ward, and show a picture of these parks, shaded according to their type.
+
+```{r echo=TRUE, eval=FALSE}
+parks <- st_read("data/Parks_and_Greenspace/Parks_and_Greenspace.shp", quiet=TRUE)
+
+somerset_parks <- parks %>%
+  filter(WARD_NAME == "Somerset")
+
+ggplot(somerset_parks) +
+  geom_sf(aes(fill=PARK_CATEG)) +
+  scale_fill_brewer(name="Park Category", palette="Set1") +
+  theme_void()
+```
+
+## Parks data
+
+```{r echo=FALSE}
+parks <- st_read("data/Parks_and_Greenspace/Parks_and_Greenspace.shp", quiet=TRUE)
+
+somerset_parks <- parks %>%
+  filter(WARD_NAME == "Somerset")
+
+ggplot(somerset_parks) +
+  geom_sf(aes(fill=PARK_CATEG)) +
+  scale_fill_brewer(name="Park Category", palette="Set1") +
+  theme_void()
+```
+
+## Vector operations - centroid
+
+It is possible to find the **centroid** of each of these parks using `st_centroid()`.
+
+```{r echo=TRUE}
+park_centroids <- st_centroid(somerset_parks)
+```
+
+```{r echo=FALSE}
+ggplot(somerset_parks) +
+  geom_sf(aes(fill=PARK_CATEG)) +
+  scale_fill_brewer(name="Park Category", palette="Set1") +
+  theme_void() +
+  geom_sf(data=park_centroids, colour="black")
+```
+
+## Vector operations – buffers
+
+We can also draw a **buffer** around each of the parks using `st_buffer`. We have to tell R the size of the buffer (e.g., 100m).
+
+```{r echo=TRUE}
+park_buffers <- st_buffer(somerset_parks, dist = 100)
+```
+
+```{r echo=FALSE}
+ggplot(somerset_parks) +
+  geom_sf(aes(fill=PARK_CATEG)) +
+  scale_fill_brewer(name="Park Category", palette="Set1") +
+  theme_void() +
+  geom_sf(data=park_buffers, colour="black", linetype="dotted", fill=NA)
+```
+
+## Vector operations – area
+
+We can calculate the **area** of objects using `st_area()`. Here we calculate the area of all the parks and pick the biggest one.
+
+```{r echo=TRUE}
+somerset_parks <- somerset_parks %>%
+  mutate(park_area = st_area(.))
+largest_park <- somerset_parks %>%
+  filter(park_area == max(somerset_parks$park_area)) %>%
+  select(NAME, park_area)
+largest_park
+```
+
+## Vector operations – distance
+
+We can conduct distance calculations using `st_distance()`. This tells us the distance between two objects. Here we calculate the distance between the centroid of the smallest and largest park, for illustration.
+
+```{r echo=TRUE}
+smallest_park <- somerset_parks %>%
+  filter(park_area == min(somerset_parks$park_area))
+st_distance(st_centroid(smallest_park), st_centroid(largest_park))
+```
+
+## Putting together
+
+Buffers, centroids, distances, areas.
+
+```{r echo=FALSE}
+library(units)
+park_centroids <- st_centroid(somerset_parks)
+park_buffers <- st_buffer(somerset_parks, dist = 100)
+largest_park <- somerset_parks %>%
+  mutate(park_area = st_area(.)) %>%
+  # arrange by area
+  arrange(desc(park_area)) %>%
+  # keep the biggest
+  slice(1) %>%
+  # use the centroid
+  st_centroid() %>%
+  dplyr::select(geometry)
+smallest_park <- somerset_parks %>%
+  mutate(park_area = st_area(.)) %>%
+  # arrange by area
+  arrange(park_area) %>%
+  # keep the smallest
+  slice(1) %>%
+  # use the centroid
+  st_centroid() %>%
+  dplyr::select(geometry)
+# Find the distance between largest and smallest
+distance_parks <- st_distance(smallest_park, largest_park)
+line <- st_sfc(st_linestring(rbind(st_coordinates(largest_park), st_coordinates(smallest_park)))) %>%
+    st_sf() %>% st_set_crs(st_crs(somerset_parks))
+midpoint <- st_coordinates(st_centroid(line))
+
+ggplot() +
+  geom_sf(data = somerset_parks, aes(fill=PARK_CATEG)) +
+  geom_sf(data = park_centroids, colour="black") +
+  geom_sf(data = park_buffers, aes(color=PARK_CATEG), linetype="dashed", fill=NA) +
+  scale_fill_brewer(palette="Set1") +
+  theme_void() +
+  geom_sf(data=line, colour="black", linetype = "dotted") +
+  geom_text(aes(x=midpoint[1], y=midpoint[2], label=paste(round(distance_parks,0), "m")))
+```
+
+## Crime data
+
+Next, we overlay data on crimes.
+
+We read data using `st_read()`.
+
+We focus again on crimes in Somerset ward, and restrict our attention to Assaults.
+
+```{r warning=FALSE, echo=TRUE}
+crimes <- st_read("data/Criminal_Offences_Open_Data/Criminal_Offences.shp", quiet=TRUE) %>%
+  filter(WARD == "Ward 14 - Somerset" ) %>%
+  filter(OFF_CATEG == "Assaults") 
+```
+
+## Transforming and cropping the data
+
+When we work with multiple data sets, we need to ensure they are projected onto the same CRS. Can use `st_transform()` to project onto a different CRS. We also use `st_crop()` to filter out any crimes that aren't covered in our parks map.
+
+```{r echo=TRUE}
+crimes <- crimes %>%
+  st_transform(st_crs(somerset_parks)) %>%
+  st_crop(somerset_parks) %>%
+  # Make a unique id #
+  mutate(crime_id = row_number())
+```
+
+## Plotting parks and crimes data together
+
+Use a separate `geom_sf()` with a different data set to plot multiple geographic layers.
+
+```{r echo=TRUE, eval=FALSE}
+ggplot() +
+  geom_sf(data = somerset_parks, aes(fill=PARK_CATEG)) +
+  geom_sf(data = park_buffers, aes(color=PARK_CATEG), linetype="dashed", fill=NA) +
+  scale_fill_brewer(palette="Set1") +
+  theme_void() +
+  geom_sf(data=crimes, shape = 4) +
+  labs(caption="Assaults marked by X")
+```
+
+## Ottawa crimes and parks
+
+```{r}
+ggplot() +
+  geom_sf(data = somerset_parks, aes(fill=PARK_CATEG)) +
+  geom_sf(data = park_buffers, aes(color=PARK_CATEG), linetype="dashed", fill=NA) +
+  scale_fill_brewer(palette="Set1") +
+  theme_void() +
+  geom_sf(data=crimes, shape = 4) +
+  labs(caption="Assaults marked by X")
+```
+
+## Extracting data for further analysis
+
+We can use `st_intersection()` to determine if one geographic layer intersects with another. For example `st_intersection(crimes, park_buffers)` will find which crimes occur within our park buffers.
+
+```{r warning=FALSE, echo=TRUE}
+# This data set only includes crimes near parks
+near_crimes <- st_intersection(crimes, park_buffers) %>%
+  dplyr::select(crime_id) %>%
+  st_drop_geometry() %>%
+  mutate(near_park = TRUE)
+
+# Now we have a data set where each crime is categorized as to whether it is near a park or not
+crimes_parks <- full_join(crimes, near_crimes)
+head(crimes_parks)
+```
+
+## Data analysis - do crimes at parks happen more at night?
+
+Let's see if the assaults that occur near parks (within the 100m) buffer are of different characteristics that the assaults that are further from parks. In particular, we test whether assaults that have occurred near parks are more likely to have occurred at night. We conduct this analysis using a t-test, and also make a summary figure. This is an example of how you can combine geospatial data with statistical analysis.
+
+## Data analysis
+
+```{r echo=TRUE}
+ night_crimes <- crimes_parks %>%
+  mutate(night = if_else(REP_HOUR > 1900 | REP_HOUR < 600, 1, 0)) %>%
+  mutate(near_park = if_else(is.na(near_park), FALSE, TRUE))
+```
+
+```{r}
+# Make a plot
+night_crimes %>%
+  group_by(near_park) %>%
+  summarise(night = mean(night)) %>%
+  ggplot(aes(x=near_park, y=night)) +
+  geom_col(fill="lightblue", colour=NA) +
+  labs(title="Are assaults near parks more likely at night?",
+       caption="Crime data from Ottawa Police Service")
+```
+
+## Statistical test
+
+We can now use our extracted data in a statistical analysis to answer our research question.
+
+```{r echo=TRUE}
+# t-test to see if crimes are more likely at night near parks
+m1 <- lm(night ~ near_park, data=night_crimes)
+modelsummary::modelsummary(m1, gof_map = c("nobs", "r.squared"), stars = TRUE)
+```
+
+# Raster data
+
+-   Raster data is a bit different to vector data.
+
+-   Rather than representing points, lines, or shapes, raster data is represented by a grid, and captures conditions continuously across the extent of the geospatial data.
+
+-   For example, raster data may represent elevation, or land use, or temperature.
+
+## Pollution raster data
+
+```{r echo=FALSE}
+# This is used to convert the ncdf file that I downloaded into a tif file
+library(ncdf4)
+library(lattice)
+library(raster)
+
+ncfile = ncdf4::nc_open("data/V6GL02.02.0p10.CNNPM25.GL.202101-202112.nc")
+names(ncfile$var)
+
+
+#Change the Input path.
+input_nc = "data/V6GL02.02.0p10.CNNPM25.GL.202101-202112.nc"
+varname = 'PM25'
+nc2raster = raster(input_nc,varname = varname,band = 1)
+
+
+nc2raster = stack(input_nc,varname = varname)
+nc2raster[nc2raster<0] <- NA
+
+# Aggregate to save space
+agg <- terra::aggregate(nc2raster, fact=5)
+
+output = 'data/pm2021.tif'
+writeRaster(agg,output,format = 'GTiff',overwrite = TRUE)
+```
+
+```{r echo=FALSE}
+library(terra)
+
+# Read the raster
+ras <- rast("data/pm2021.tif")
+
+# Show the pollution level worldwide
+plot(ras)
+```
+
+## What's the code?
+
+Raster data is read using the `terra` package (need to install first). Read a raster using the `rast()` function. Plot a raster using `plot()`.
+
+```{r echo=TRUE, eval=FALSE}
+library(terra)
+
+# Read the raster
+ras <- rast("data/pm2021.tif")
+
+# Show the pollution level worldwide
+plot(ras)
+```
+
+## ggplot()ing rasters
+
+`plot()` produces a nice raster plot. But it doesn't use the `ggplot()` syntax we are used to, which means we can't easily add other layers. To use `ggplot`, we need to convert the raster to a data frame.
+
+```{r echo=TRUE, eval=FALSE}
+ras_df <- as.data.frame(ras, xy=TRUE)
+ggplot() +
+  geom_raster(data=ras_df, aes(x=x,y=y, fill=pm2021)) +
+  theme_void() +
+  scale_fill_viridis()
+```
+
+## ggplot()ing rasters
+
+```{r echo=FALSE}
+ras_df <- as.data.frame(ras, xy=TRUE)
+ggplot() +
+  geom_raster(data=ras_df, aes(x=x,y=y, fill=pm2021)) +
+  theme_void() +
+  scale_fill_gradient(low="white", high="firebrick")
+```
+
+## Extracting raster data
+
+-   The most common thing to do with raster data is to `extract()` it.
+
+-   This operation reveals the level of the raster variable corresponding to some vector.
+
+-   For example, it would be possible to get the maximum pollution level in all cities in the world (by extracting the pollution raster over city points) or the average pollution level in different countries or regions.
+
+## Example of extracting data
+
+-   Create a data set with the location of Ottawa and Delhi.
+
+```{r echo=TRUE}
+cities <- tibble(name = c("Ottawa", "Delhi"),
+                 latitude = c(45.4201, 28.7041),
+                 longitude = c(-75.7003, 77.1025))
+```
+
+## Extracting data
+
+```{r}
+# Add to plot
+ggplot() +
+  geom_raster(data=ras_df, aes(x=x,y=y, fill=pm2021)) +
+  theme_void() +
+  scale_fill_gradient(low="white", high="firebrick") +
+  geom_point(data=cities, aes(x=longitude, y=latitude)) +
+  geom_text(data=cities, aes(x=longitude, y=latitude, label=name), nudge_y = -2)
+```
+
+## Extracting data
+
+To `extract()` data from a raster over a vector, need an `sf` object.
+
+```{r echo=TRUE}
+# Convert to sf object
+cities_sf <- st_as_sf(cities, coords=c("longitude", "latitude"), crs=4326)
+```
+
+Use extract to obtain pollution in each city.
+
+```{r echo=TRUE}
+pl <- terra::extract(ras, cities_sf, bind=TRUE)
+as_tibble(pl)
+```
+
+## Extracting data for polygons
+
+-   We can extract data over different types of vectors - points, lines, polygons
+
+-   We will do the latter and calculate average pollution in African countries. We begin by loading up shapefiles for African countries. This is a vector file as above.
+
+```{r echo=TRUE}
+af <- st_read("data/africa_shapefiles/8e76854e-6afa-4b3e-9efa-42594d22176c/afr_g2014_2013_0.shp", quiet=TRUE)
+```
+
+## African countries
+
+```{r echo=TRUE}
+ggplot() +
+  geom_raster(data=ras_df, aes(x=x,y=y, fill=pm2021)) +
+  theme_void() +
+  scale_fill_gradient(low="white", high="firebrick") +
+  geom_sf(data=af, colour="black", fill=NA)
+```
+
+## Extract country pollution
+
+We then use the `extract` function to pull out the level of pollution in different countries. There are many raster grid cells in each country, and we are taking the mean of these (see the reference to mean in the function call).
+
+```{r echo=TRUE}
+# Get the mean pollution by country
+cp <- terra::extract(ras, af, fun=mean, bind=TRUE)
+```
+
+## Results
+
+```{r echo=TRUE}
+country_air_pollution <- cp %>%
+  as_tibble() %>%
+  dplyr::select(ADM0_NAME, ISO3, pm2021)
+head(country_air_pollution)
+```
+
+We can then plot the results.
+
+## Plot
+
+```{r echo=TRUE}
+# Add geometry
+cp_af <- inner_join(af, country_air_pollution)
+# Plot it
+ggplot() +
+  geom_sf(data=cp_af, aes(fill=pm2021)) +
+  scale_fill_continuous(name="Annual PM2.5",low="steelblue", high="firebrick") +
+  theme_void()
+```
+
+## Further analysis
+
+-   As before, we can combine this with other data for analysis.
+
+-   Here, I will combine the air pollution concentration data with data on GDP per capita, and see if there's a relationship between the two.
+
+## Obtain GDP per capita data
+
+Data can be downloaded directly from World Bank
+
+```{r warning=FALSE, echo=TRUE    }
+# Obtain GDP per capita data from the world bank. 
+library(wbstats)
+# wb_search("GDP per capita") to find data series
+gdp <- wb_data("NY.GDP.PCAP.CD") %>%
+  # Same year as air pollution data
+  filter(date == 2021) %>%
+  dplyr::select(ISO3 = iso3c, gdp_per_capita = NY.GDP.PCAP.CD)
+
+dat <- inner_join(country_air_pollution, gdp)
+```
+
+## Plot the relationship
+
+```{r}
+# Plot the relationship
+ggplot(dat, aes(x=pm2021, y=gdp_per_capita)) +
+  geom_point(colour="steelblue") +
+  theme_minimal() +
+  geom_smooth(method="lm", se=F, colour="firebrick") +
+  labs(x="Annual mean air pollution (ug/m3 PM2.5)",
+       y="GDP per capita (2011$US)",
+       caption="Data for year 2021")
+```
+
+## Test the hypothesis
+
+Is higher GDP per capita associated with less pollution? Is it causal?
+
+```{r}
+# Run a regression
+m1 <- lm(gdp_per_capita ~ pm2021, data=dat)
+modelsummary::modelsummary(m1, gof_map=c("nobs", "r.squared"), stars=TRUE)
+```
