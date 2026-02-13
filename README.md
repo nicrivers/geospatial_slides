@@ -2,4 +2,4 @@
 
 Slides created using R and revealjs.
 
-Live version will be available via GitHub Pages.
+Web version is posted here: https://nicrivers.github.io/geospatial_slides/geospatial.html
